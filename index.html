@@ -63,6 +63,7 @@ a{color:var(--petrol-2)}
 .stat-chips{display:flex;gap:9px;flex-wrap:wrap;margin-top:20px}
 .chip{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.25);padding:7px 14px;border-radius:99px;font-size:14px;font-weight:700}
 .chip b{color:#ffd88f;font-size:16px}
+.visit-chip b{direction:ltr;unicode-bidi:isolate;letter-spacing:.15px}
 .poster-card{background:#fff;padding:9px;border-radius:var(--r-lg);transform:rotate(-1.4deg);box-shadow:0 18px 40px rgba(0,0,0,.30);max-width:340px;justify-self:center;width:100%}
 .poster-card img{border-radius:12px;display:block;width:100%}
 .poster-cap{text-align:center;font-size:12.5px;color:var(--muted);font-weight:700;padding:7px 4px 3px}
@@ -322,6 +323,7 @@ a{color:var(--petrol-2)}
           <span class="chip">الدرجة من <b>100</b></span>
           <span class="chip"><b>16</b> معيارًا</span>
           <span class="chip">تصحيح + شرح في النهاية ✅</span>
+          <span class="chip visit-chip">👁️ زيارات المحاكي: <b data-visit-count aria-live="polite">…</b></span>
         </div>
       </div>
       <a class="poster-card" href="https://tafrud.com/course/haseb" target="_blank" rel="noopener" style="text-decoration:none">
@@ -550,7 +552,8 @@ a{color:var(--petrol-2)}
     </div>
     <div class="footer-bottom">
       © <b>جميع حقوق محتوى هذا المحاكي محفوظة بالكامل لأ. سالم شطا</b> — المحاكي مجاني وهو <b>هدية منه</b> عبر منصة تفرّد لمعلمي ومعلمات حاسب آلي.<br>
-      محاكي حاسب آلي الرخصة المهنية (88 سؤالًا — الدرجة من 100) • منصة تفرّد التعليمية • إعداد وبرمجة <b>أ. سالم شطا</b>
+      محاكي حاسب آلي الرخصة المهنية (88 سؤالًا — الدرجة من 100) • منصة تفرّد التعليمية • إعداد وبرمجة <b>أ. سالم شطا</b><br>
+      👁️ زيارات المحاكي: <b data-visit-count aria-live="polite">…</b>
     </div>
   </div>
 </footer>
@@ -576,6 +579,36 @@ const QUESTIONS = [{"id": 1, "section": "المعيار 1: الرياضيات", 
 const TOTAL = QUESTIONS.length;
 const LETTERS = ["أ","ب","ج","د"];
 const LS_KEY = "tafrud_computer_sim1448_v1";
+const VISIT_COUNTER = {
+  host: "computer-simulator-1448.onrender.com",
+  url: "https://abacus.jasoncameron.dev/hit/computer-simulator-1448.onrender.com/page-visits-v1"
+};
+let visitCounterStarted = false;
+async function initVisitCounter(){
+  if(visitCounterStarted) return;
+  visitCounterStarted = true;
+  const nodes = document.querySelectorAll("[data-visit-count]");
+  if(!nodes.length) return;
+  const showUnavailable = () => nodes.forEach(node => { node.textContent = "—"; });
+  if(window.location.hostname !== VISIT_COUNTER.host || !window.fetch){ showUnavailable(); return; }
+  const controller = window.AbortController ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), 7000) : null;
+  try {
+    const options = {method:"GET", mode:"cors", cache:"no-store", credentials:"omit"};
+    if(controller) options.signal = controller.signal;
+    const response = await fetch(VISIT_COUNTER.url, options);
+    if(!response.ok) throw new Error("Visitor counter unavailable");
+    const data = await response.json();
+    const value = Number(data && data.value);
+    if(!Number.isFinite(value) || value < 0) throw new Error("Invalid visitor count");
+    const formatted = Math.trunc(value).toLocaleString("en-US");
+    nodes.forEach(node => { node.textContent = formatted; });
+  } catch(e) {
+    showUnavailable();
+  } finally {
+    if(timeout) clearTimeout(timeout);
+  }
+}
 const STORE = (function(){
   let mem = null, ok = false;
   try { localStorage.setItem("__t","1"); localStorage.removeItem("__t"); ok = true; } catch(e) { ok = false; }
@@ -838,7 +871,7 @@ function confetti(){
 
 /* ===== أحداث ===== */
 document.addEventListener("DOMContentLoaded", () => {
-  renderSectionsGrid(); refreshResumeBanner();
+  initVisitCounter(); renderSectionsGrid(); refreshResumeBanner();
   $("#startBtn").addEventListener("click", () => {
     const old = loadSaved();
     if(old && !old.submitted && !confirm("لديك محاولة غير مكتملة. بدء محاولة جديدة سيستبدلها. هل تريد المتابعة؟")) return;
