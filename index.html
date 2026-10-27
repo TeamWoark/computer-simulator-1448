@@ -74,7 +74,7 @@ a{color:var(--petrol-2)}
 .hero-secondary-cta:hover{background:rgba(255,255,255,.23);color:#fff}
 #settingsTitle,#standardsTitle{scroll-margin-top:96px}
 .start-card{border:2px solid rgba(238,106,44,.35);box-shadow:0 14px 34px rgba(15,61,58,.12)}
-.start-intro{margin:-2px 0 16px;color:var(--ink-soft);font-weight:700;line-height:1.9}
+.start-intro{margin:-2px 0 16px;color:var(--ink-soft);font-weight:700;line-height:1.9}\n.report-note{margin:0 0 16px;background:var(--petrol-soft);border:1px solid rgba(21,84,80,.18);border-radius:13px;padding:11px 13px;color:var(--petrol-ink);font-size:13.5px;line-height:1.85}
 .poster-card{background:#fff;padding:9px;border-radius:var(--r-lg);transform:rotate(-1.4deg);box-shadow:0 18px 40px rgba(0,0,0,.30);max-width:340px;justify-self:center;width:100%}
 .poster-card img{border-radius:12px;display:block;width:100%}
 .poster-cap{text-align:center;font-size:12.5px;color:var(--muted);font-weight:700;padding:7px 4px 3px}
@@ -381,11 +381,12 @@ a{color:var(--petrol-2)}
   <h2 class="sec-title" id="settingsTitle">🚀 ابدأ المحاكاة الآن</h2>
   <div class="card start-card">
     <p class="start-intro">جاهز؟ اكتب اسمك إن رغبت، واختر المؤقّت وطريقة ترتيب الأسئلة، ثم اضغط «ابدأ الاختبار الآن». وبطاقات المعايير الستة عشر موجودة أسفل هذا القسم لمن يريد الاطلاع عليها قبل البدء.</p>
+    <p class="report-note" id="reportPrivacyNote" hidden>📊 لأغراض المتابعة التعليمية، تُسجَّل زيارتك بمعرّف مجهول ثابت لهذا المتصفح، وعند إكمال المحاكاة تُسجَّل درجتك ونتائج المعايير ومدة الحل ونوع الجهاز — إضافة إلى الاسم فقط إذا كتبته أدناه. لا تُسجَّل إجاباتك التفصيلية أو موقعك الجغرافي.</p>
     <div class="settings-grid">
       <div class="field">
         <label class="lbl" for="studentName">👤 اسم المتدرب (اختياري)</label>
         <input type="text" id="studentName" placeholder="اكتب اسمك ليظهر في نتيجتك..." maxlength="40">
-        <div class="hint">يظهر فقط داخل جهازك في شاشة النتيجة، ولا يُرسل لأي جهة.</div>
+        <div class="hint" id="studentNameHint">يظهر فقط داخل جهازك في شاشة النتيجة، ولا يُرسل لأي جهة.</div>
       </div>
       <div class="field">
         <label class="lbl">⏱️ المؤقّت</label>
@@ -646,6 +647,195 @@ const SEC_ICONS = {"المعيار 1: الرياضيات":"🧮","المعيار
 
 let S = null, timerInt = null;
 
+/* ===== تقرير الزيارات والأجهزة والنتائج (Google Sheets) =====
+   يظل هذا النظام صامتًا تمامًا حتى يوضع رابط Web App المنشور من Google Apps Script
+   في endpoint أدناه. لا تُرسل إلا إلى نطاق الإنتاج، ولا يتضمن نظام التشغيل أو IP أو الموقع. */
+const REPORT_ANALYTICS = {
+  endpoint: "https://script.google.com/macros/s/AKfycbxQbpL-fgvkHseJeCmOF1MGv1Z0h3VcLjyRwZAKCvTOykjvQCdLEih-tQZz5KyAuoNz/exec",
+  sharedKey: "tafrud-computer-report-v1",
+  host: "computer-simulator-1448.onrender.com",
+  version: "computer-1448-report-v1",
+  deviceKey: "tafrud_computer_report_device_v1",
+  outboxKey: "tafrud_computer_report_outbox_v1"
+};
+let reportSessionId = createReportId();
+let reportDeviceIdCache = "";
+let reportVisitQueued = false;
+let reportFlushInProgress = false;
+
+function createReportId(){
+  try { if(window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID(); } catch(e) {}
+  let suffix = "";
+  const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  for(let i=0;i<24;i++) suffix += alphabet[Math.floor(Math.random()*alphabet.length)];
+  return Date.now().toString(36) + "-" + suffix;
+}
+function reportStorageGet(key){ try { return window.localStorage.getItem(key); } catch(e) { return null; } }
+function reportStorageSet(key, value){ try { window.localStorage.setItem(key, value); return true; } catch(e) { return false; } }
+function reportLikelyBot(){
+  try {
+    if(navigator.webdriver) return true;
+    return /bot|crawler|spider|slurp|headlesschrome|puppeteer|playwright/i.test(navigator.userAgent || "");
+  } catch(e) { return false; }
+}
+function reportEnabled(){
+  return /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec(?:\?|$)/.test(REPORT_ANALYTICS.endpoint || "") &&
+    window.location.hostname === REPORT_ANALYTICS.host && !reportLikelyBot();
+}
+function getReportDeviceId(){
+  if(reportDeviceIdCache) return reportDeviceIdCache;
+  const saved = reportStorageGet(REPORT_ANALYTICS.deviceKey);
+  if(saved && /^[A-Za-z0-9._:-]{8,90}$/.test(saved)) reportDeviceIdCache = saved;
+  else {
+    reportDeviceIdCache = createReportId();
+    reportStorageSet(REPORT_ANALYTICS.deviceKey, reportDeviceIdCache);
+  }
+  return reportDeviceIdCache;
+}
+function reportDeviceType(){
+  const ua = navigator.userAgent || "";
+  if(/iPad|Tablet|PlayBook|Silk|Kindle/i.test(ua) || (/Android/i.test(ua) && !/Mobile/i.test(ua))) return "جهاز لوحي";
+  if(/Mobi|Android|iPhone|iPod|Windows Phone|BlackBerry/i.test(ua)) return "جوال";
+  try { if(navigator.userAgentData && navigator.userAgentData.mobile === true) return "جوال"; } catch(e) {}
+  return "كمبيوتر";
+}
+function readReportOutbox(){
+  try {
+    const parsed = JSON.parse(reportStorageGet(REPORT_ANALYTICS.outboxKey) || "[]");
+    return Array.isArray(parsed) ? parsed.filter(x => x && x.eventId && x.eventType).slice(-50) : [];
+  } catch(e) { return []; }
+}
+function writeReportOutbox(box){ reportStorageSet(REPORT_ANALYTICS.outboxKey, JSON.stringify(box.slice(-50))); }
+function queueReportEvent(eventType, details){
+  if(!reportEnabled()) return false;
+  details = details || {};
+  const event = Object.assign({}, details, {
+    schemaVersion: 1,
+    sharedKey: REPORT_ANALYTICS.sharedKey,
+    eventType: eventType,
+    eventId: createReportId(),
+    deviceId: getReportDeviceId(),
+    sessionId: reportSessionId,
+    attemptId: details.attemptId || (S && S.reportAttemptId) || "",
+    clientTime: new Date().toISOString(),
+    deviceType: reportDeviceType(),
+    simulator: "computer-simulator-1448",
+    reportVersion: REPORT_ANALYTICS.version
+  });
+  const box = readReportOutbox();
+  if(box.some(x => x.eventId === event.eventId)) return false;
+  box.push(event);
+  while(box.length > 50){
+    const removable = box.findIndex(x => x.eventType !== "completed");
+    if(removable >= 0) box.splice(removable, 1); else box.shift();
+  }
+  writeReportOutbox(box);
+  flushReportOutbox();
+  return true;
+}
+async function dispatchReportEvent(event){
+  const body = JSON.stringify(event);
+  try {
+    if(navigator.sendBeacon){
+      const blob = new Blob([body], {type:"text/plain;charset=UTF-8"});
+      if(navigator.sendBeacon(REPORT_ANALYTICS.endpoint, blob)) return true;
+    }
+  } catch(e) {}
+  if(!window.fetch) return false;
+  try {
+    await fetch(REPORT_ANALYTICS.endpoint, {
+      method: "POST", mode: "no-cors", credentials: "omit", keepalive: true,
+      headers: {"Content-Type":"text/plain;charset=UTF-8"}, body: body
+    });
+    return true;
+  } catch(e) { return false; }
+}
+function flushReportOutbox(){
+  if(!reportEnabled() || reportFlushInProgress) return;
+  const box = readReportOutbox();
+  if(!box.length) return;
+  reportFlushInProgress = true;
+  const sentIds = new Set();
+  let chain = Promise.resolve();
+  box.forEach(event => {
+    chain = chain.then(async () => { if(await dispatchReportEvent(event)) sentIds.add(event.eventId); });
+  });
+  const finish = () => {
+    const remaining = readReportOutbox().filter(x => !sentIds.has(x.eventId));
+    writeReportOutbox(remaining);
+    reportFlushInProgress = false;
+    if(remaining.length && sentIds.size) setTimeout(flushReportOutbox, 5000);
+  };
+  chain.then(finish, finish);
+}
+function initReportAnalytics(){
+  if(!reportEnabled()) return;
+  const note = $("#reportPrivacyNote"); if(note) note.hidden = false;
+  const hint = $("#studentNameHint");
+  if(hint) hint.textContent = "يظهر الاسم في نتيجتك، وقد يُسجَّل مع درجتك عند إكمال المحاكاة لأغراض المتابعة التعليمية؛ اتركه فارغًا إن لم ترغب بذلك.";
+  flushReportOutbox();
+  const sendVisit = () => {
+    if(reportVisitQueued) return;
+    reportVisitQueued = queueReportEvent("visit", {});
+  };
+  if(document.prerendering) document.addEventListener("prerenderingchange", () => setTimeout(sendVisit, 900), {once:true});
+  else setTimeout(sendVisit, 900);
+  window.addEventListener("online", flushReportOutbox);
+  document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") flushReportOutbox(); });
+}
+function cleanReportName(value){
+  return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80);
+}
+function reportIso(ms){
+  const d = new Date(ms);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : "";
+}
+function ensureReportAttemptId(){
+  if(!S) return "";
+  if(!S.reportAttemptId || typeof S.reportAttemptId !== "string" || !/^[A-Za-z0-9._:-]{8,90}$/.test(S.reportAttemptId)) S.reportAttemptId = createReportId();
+  return S.reportAttemptId;
+}
+function trackAttemptStarted(){
+  if(!S || S.reportStartedSent) return;
+  const attemptId = ensureReportAttemptId();
+  const queued = queueReportEvent("started", {
+    attemptId: attemptId,
+    startedAt: reportIso(S.startedAt),
+    timerMinutes: Number(S.timerMin) || 0,
+    shuffleQuestions: !!S.shuffleQuestions,
+    shuffleOptions: !!S.shuffleOptions
+  });
+  if(queued) S.reportStartedSent = true;
+}
+function trackAttemptCompleted(){
+  if(!S || !S.result || S.reportCompletedSent) return;
+  const attemptId = ensureReportAttemptId();
+  const r = S.result;
+  const queued = queueReportEvent("completed", {
+    attemptId: attemptId,
+    traineeName: cleanReportName(S.name),
+    score100: r.score,
+    correctCount: r.correct,
+    answeredCount: r.correct + r.wrong,
+    wrongCount: r.wrong,
+    unansweredCount: r.none,
+    totalQuestions: TOTAL,
+    durationSec: r.elapsedSec,
+    startedAt: reportIso(S.startedAt),
+    completedAt: reportIso(S.submittedAt),
+    timerMinutes: Number(S.timerMin) || 0,
+    autoSubmitted: !!S.autoSubmitted,
+    shuffleQuestions: !!S.shuffleQuestions,
+    shuffleOptions: !!S.shuffleOptions,
+    standards: r.perSection.map(p => ({
+      section: p.section, correct: p.correct, total: p.total,
+      pct: p.total ? Math.round(p.correct / p.total * 1000) / 10 : 0
+    }))
+  });
+  if(queued) S.reportCompletedSent = true;
+}
+
+
 function shuffle(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 function plain(html){ const d=document.createElement("div"); d.innerHTML=html; return d.textContent||""; }
 function fmt(sec){ sec=Math.max(0,Math.round(sec)); const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60; const p=n=>String(n).padStart(2,"0"); return h>0? p(h)+":"+p(m)+":"+p(s) : p(m)+":"+p(s); }
@@ -704,10 +894,11 @@ function startNewAttempt(){
     optOrder[q.id] = idx;
   });
   S = { v:1, name, timerMin, shuffleOptions:shOpt, shuffleQuestions:shQ, order, optOrder, answers:{}, marked:[], currentPos:0, startedAt:Date.now(), submitted:false, submittedAt:null, autoSubmitted:false, result:null };
-  save(); enterExam();
+  trackAttemptStarted(); save(); enterExam();
   toast("بدأ الاختبار — بالتوفيق 🍀");
 }
 function enterExam(){
+  ensureReportAttemptId();
   showScreen("examScreen");
   $("#examStudent").textContent = "إعداد أ. سالم شطا" + (S.name ? " • المتدرب: " + S.name : "");
   renderPalette(); renderQuestion(); startTimer();
@@ -809,7 +1000,7 @@ function submitAttempt(auto){
   });
   const elapsedSec = (S.timerMin>0 && auto) ? S.timerMin*60 : Math.max(1, Math.round((S.submittedAt - S.startedAt)/1000));
   S.result = { correct, wrong, none, score: Math.round(correct/TOTAL*100), pct: Math.round(correct/TOTAL*1000)/10, elapsedSec, perSection: SECTIONS.map(s=>perSec[s.ar]), auto: !!auto };
-  save(); renderResults(true);
+  trackAttemptCompleted(); save(); renderResults(true);
   if(auto) toast("⏰ انتهى الوقت — تم تسليم الاختبار تلقائيًا");
 }
 
@@ -892,7 +1083,7 @@ function confetti(){
 
 /* ===== أحداث ===== */
 document.addEventListener("DOMContentLoaded", () => {
-  initVisitCounter(); renderSectionsGrid(); refreshResumeBanner();
+  initVisitCounter(); initReportAnalytics(); renderSectionsGrid(); refreshResumeBanner();
   $("#startBtn").addEventListener("click", () => {
     const old = loadSaved();
     if(old && !old.submitted && !confirm("لديك محاولة غير مكتملة. بدء محاولة جديدة سيستبدلها. هل تريد المتابعة؟")) return;
